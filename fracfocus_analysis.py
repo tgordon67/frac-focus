@@ -514,6 +514,227 @@ class FracFocusAnalyzer:
 
         return aggregated
 
+    # ==================== PHASE 7: VALIDATION & EDGE CASES ====================
+
+    def validate_data(self, df: pd.DataFrame) -> Dict[str, List[str]]:
+        """
+        Run comprehensive validation checks and report issues.
+
+        Args:
+            df: DataFrame to validate (should have Proppant_lbs calculated)
+
+        Returns:
+            Dictionary of issue categories and their descriptions
+        """
+        logger.info("\n=== RUNNING VALIDATION CHECKS ===")
+        issues = {
+            'critical': [],
+            'warnings': [],
+            'info': []
+        }
+
+        # Check 1: Proppant > 80% of total (should be impossible)
+        logger.info("Check 1: Excessive proppant percentages...")
+        disclosure_df = df.drop_duplicates(subset=['DisclosureId'])
+
+        # Calculate proppant percentage for each disclosure
+        proppant_pcts = []
+        for disc_id in disclosure_df['DisclosureId'].sample(min(1000, len(disclosure_df))):
+            disc_data = df[df['DisclosureId'] == disc_id]
+            proppant_rows = disc_data[
+                disc_data['Purpose'].str.contains('Proppant', case=False, na=False)
+            ]
+            if len(proppant_rows) > 0:
+                total_pct = proppant_rows['PercentHFJob'].sum()
+                if total_pct > 80:
+                    proppant_pcts.append((disc_id, total_pct))
+
+        if proppant_pcts:
+            issues['warnings'].append(
+                f"{len(proppant_pcts)} disclosures with proppant > 80% "
+                f"(max: {max([p[1] for p in proppant_pcts]):.1f}%)"
+            )
+
+        # Check 2: Water volume outliers
+        logger.info("Check 2: Water volume outliers...")
+        high_water = disclosure_df[disclosure_df['TotalBaseWaterVolume'] > 20_000_000]
+        if len(high_water) > 0:
+            issues['warnings'].append(
+                f"{len(high_water)} disclosures with water > 20M gallons "
+                f"(max: {high_water['TotalBaseWaterVolume'].max() / 1e6:.1f}M gal)"
+            )
+
+        # Check 3: Missing critical fields
+        logger.info("Check 3: Missing critical fields...")
+        critical_fields = ['DisclosureId', 'JobStartDate', 'CountyName', 'StateName']
+        for field in critical_fields:
+            if field in df.columns:
+                missing_count = df[field].isnull().sum()
+                if missing_count > 0:
+                    issues['warnings'].append(
+                        f"{missing_count:,} rows missing {field} "
+                        f"({missing_count/len(df)*100:.1f}%)"
+                    )
+
+        # Check 4: Date range sanity
+        logger.info("Check 4: Date validity...")
+        future_dates = disclosure_df[disclosure_df['JobStartDate'] > pd.Timestamp.now()]
+        if len(future_dates) > 0:
+            issues['warnings'].append(
+                f"{len(future_dates)} disclosures with future start dates"
+            )
+
+        old_dates = disclosure_df[disclosure_df['JobStartDate'] < pd.Timestamp('2010-01-01')]
+        if len(old_dates) > 0:
+            issues['info'].append(
+                f"{len(old_dates)} disclosures before 2010 "
+                "(may have limited chemical detail data)"
+            )
+
+        # Check 5: Extreme job durations
+        logger.info("Check 5: Job duration outliers...")
+        long_jobs = disclosure_df[disclosure_df['JobDurationDays'] > 365]
+        if len(long_jobs) > 0:
+            issues['warnings'].append(
+                f"{len(long_jobs)} jobs with duration > 365 days "
+                f"(max: {disclosure_df['JobDurationDays'].max()} days)"
+            )
+
+        zero_duration = disclosure_df[disclosure_df['JobDurationDays'] == 0]
+        if len(zero_duration) > 0:
+            issues['info'].append(
+                f"{len(zero_duration)} jobs with 0-day duration "
+                "(same start and end date)"
+            )
+
+        # Check 6: Proppant calculation validation
+        logger.info("Check 6: Proppant calculation validation...")
+        if 'MassIngredient' in df.columns:
+            # Compare calculated vs reported mass for sample
+            sample_df = disclosure_df.sample(min(100, len(disclosure_df)))
+            discrepancies = []
+
+            for disc_id in sample_df['DisclosureId']:
+                disc_data = df[df['DisclosureId'] == disc_id]
+                proppant_rows = disc_data[
+                    disc_data['Purpose'].str.contains('Proppant', case=False, na=False)
+                ]
+
+                if len(proppant_rows) > 0:
+                    reported_mass = proppant_rows['MassIngredient'].sum()
+                    calculated_mass = disc_data['Proppant_lbs'].iloc[0]
+
+                    if pd.notna(reported_mass) and reported_mass > 0:
+                        diff_pct = abs(calculated_mass - reported_mass) / reported_mass * 100
+                        if diff_pct > 20:
+                            discrepancies.append((disc_id, diff_pct))
+
+            if discrepancies:
+                issues['info'].append(
+                    f"{len(discrepancies)}/{len(sample_df)} sampled disclosures "
+                    f"have >20% discrepancy between calculated and reported proppant mass"
+                )
+
+        # Check 7: Missing proppant data
+        logger.info("Check 7: Missing proppant data...")
+        no_proppant = disclosure_df[disclosure_df['Proppant_lbs'] == 0]
+        if len(no_proppant) > 0:
+            issues['info'].append(
+                f"{len(no_proppant):,} disclosures with 0 proppant "
+                f"({len(no_proppant)/len(disclosure_df)*100:.1f}%)"
+            )
+
+        # Check 8: Basin classification coverage
+        logger.info("Check 8: Basin classification coverage...")
+        if 'Basin' in disclosure_df.columns:
+            unclassified = disclosure_df[disclosure_df['Basin'] == 'Other']
+            if len(unclassified) > 0:
+                issues['info'].append(
+                    f"{len(unclassified):,} disclosures not classified into major basins "
+                    f"({len(unclassified)/len(disclosure_df)*100:.1f}%)"
+                )
+
+        return issues
+
+    def generate_validation_report(self, issues: Dict[str, List[str]],
+                                   output_path: Path) -> None:
+        """
+        Generate a validation report file.
+
+        Args:
+            issues: Dictionary of validation issues
+            output_path: Path to save the report
+        """
+        logger.info(f"Generating validation report: {output_path}")
+
+        with open(output_path, 'w') as f:
+            f.write("=" * 80 + "\n")
+            f.write("FRACFOCUS DATA VALIDATION REPORT\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 80 + "\n\n")
+
+            for category in ['critical', 'warnings', 'info']:
+                if issues[category]:
+                    f.write(f"\n{category.upper()}\n")
+                    f.write("-" * 80 + "\n")
+                    for issue in issues[category]:
+                        f.write(f"  • {issue}\n")
+                    f.write("\n")
+
+            if not any(issues.values()):
+                f.write("\n✓ No validation issues found\n")
+
+        logger.info(f"Validation report saved to {output_path}")
+
+    def handle_edge_cases(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Handle known edge cases in the data.
+
+        Args:
+            df: DataFrame with potential edge cases
+
+        Returns:
+            DataFrame with edge cases handled
+        """
+        logger.info("Handling edge cases...")
+        initial_count = len(df)
+
+        # Edge Case 1: Negative percentages
+        if 'PercentHFJob' in df.columns:
+            negative_pct = df['PercentHFJob'] < 0
+            if negative_pct.any():
+                logger.info(f"  Setting {negative_pct.sum()} negative percentages to 0")
+                df.loc[negative_pct, 'PercentHFJob'] = 0
+
+        # Edge Case 2: Proppant > water mass (impossible)
+        disclosure_df = df.drop_duplicates(subset=['DisclosureId'])
+        water_mass = disclosure_df['TotalBaseWaterVolume'] * 8.34
+        impossible = disclosure_df['Proppant_lbs'] > water_mass * 0.8  # 80% threshold
+
+        if impossible.any():
+            logger.info(f"  Flagging {impossible.sum()} disclosures with proppant > 80% of water mass")
+            df['Flag_ImpossibleProppant'] = df['DisclosureId'].isin(
+                disclosure_df[impossible]['DisclosureId']
+            )
+        else:
+            df['Flag_ImpossibleProppant'] = False
+
+        # Edge Case 3: Multiple proppant types
+        proppant_types = df[
+            df['Purpose'].str.contains('Proppant', case=False, na=False)
+        ].groupby('DisclosureId')['IngredientName'].nunique()
+
+        multiple_types = proppant_types[proppant_types > 1]
+        if len(multiple_types) > 0:
+            logger.info(f"  Found {len(multiple_types)} disclosures with multiple proppant types")
+            df['MultipleProppantTypes'] = df['DisclosureId'].isin(multiple_types.index)
+        else:
+            df['MultipleProppantTypes'] = False
+
+        logger.info(f"Edge case handling complete")
+
+        return df
+
 
 def main():
     """Main execution function"""
@@ -545,6 +766,10 @@ def main():
 
     # Phase 3: Calculate proppant
     df_with_proppant = analyzer.add_proppant_calculations(df_clean)
+
+    # Phase 7a: Handle edge cases early
+    logger.info("\n=== PHASE 7: VALIDATION & EDGE CASES ===")
+    df_with_proppant = analyzer.handle_edge_cases(df_with_proppant)
 
     # Phase 4: Quarterly attribution
     logger.info("\n=== PHASE 4: QUARTERLY ATTRIBUTION ===")
@@ -585,6 +810,23 @@ def main():
     else:
         summary_permian_county = None
         logger.warning("No Permian Basin data found")
+
+    # Phase 7b: Run validation checks
+    logger.info("\n=== VALIDATION CHECKS ===")
+    validation_issues = analyzer.validate_data(df_with_proppant)
+
+    # Generate validation report
+    validation_report_path = OUTPUT_DIR / 'validation_report.txt'
+    analyzer.generate_validation_report(validation_issues, validation_report_path)
+
+    # Display validation summary
+    for category, issues in validation_issues.items():
+        if issues:
+            logger.info(f"\n{category.upper()}: {len(issues)} issue(s)")
+            for issue in issues[:3]:  # Show first 3 only
+                logger.info(f"  • {issue}")
+            if len(issues) > 3:
+                logger.info(f"  ... and {len(issues) - 3} more (see validation report)")
 
     # Save all outputs
     logger.info("\n=== SAVING OUTPUTS ===")
