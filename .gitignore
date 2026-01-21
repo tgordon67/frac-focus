@@ -11,6 +11,9 @@ venv/
 # Data files (large CSVs)
 data/*.csv
 data/*.zip
+data/extracted/
+data/backups/
+data/consolidated_data.csv
 *.csv
 *.zip
 
@@ -29,7 +32,9 @@ Thumbs.db
 
 # Output
 output/*.csv
+output/*.txt
 !output/.gitkeep
 
 # Logs
+logs/
 *.log
