@@ -285,6 +285,235 @@ class FracFocusAnalyzer:
 
         return df
 
+    # ==================== PHASE 4: QUARTERLY ATTRIBUTION ====================
+
+    def distribute_across_quarters(self, row: pd.Series) -> Dict[str, float]:
+        """
+        For jobs spanning multiple quarters, distribute proppant proportionally
+        based on days in each quarter.
+
+        Example: Job from Dec 15, 2023 to Jan 15, 2024 (31 days)
+        - Q4 2023: 16 days → 52% of proppant
+        - Q1 2024: 15 days → 48% of proppant
+
+        Args:
+            row: DataFrame row with JobStartDate, JobEndDate, JobDurationDays
+
+        Returns:
+            Dictionary of {quarter: proportion}
+        """
+        start = row['JobStartDate']
+        end = row['JobEndDate']
+        total_days = row['JobDurationDays']
+
+        if total_days == 0:
+            # Single day job
+            return {start.to_period('Q'): 1.0}
+
+        # Generate date range for each day of the job
+        date_range = pd.date_range(start, end, freq='D')
+
+        # Count days in each quarter
+        quarter_days = date_range.to_period('Q').value_counts()
+
+        # Calculate proportion for each quarter
+        proportions = {}
+        for quarter, days in quarter_days.items():
+            proportions[str(quarter)] = days / total_days
+
+        return proportions
+
+    def attribute_to_quarters(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create a quarterly aggregation with proppant attributed correctly.
+
+        Business Rules:
+        - Short jobs (≤45 days): 100% attributed to start quarter
+        - Long jobs (>45 days): Distributed proportionally across quarters
+        - Extreme outliers (>365 days): Flagged for manual review
+
+        Args:
+            df: DataFrame with Proppant_lbs calculated
+
+        Returns:
+            DataFrame with one row per disclosure-quarter combination
+        """
+        logger.info("Attributing proppant and water to quarters...")
+
+        # Get unique disclosures (one row per disclosure)
+        disclosure_df = df.drop_duplicates(subset=['DisclosureId'])
+
+        results = []
+        long_jobs = 0
+        extreme_outliers = 0
+
+        for idx, row in disclosure_df.iterrows():
+            job_duration = row['JobDurationDays']
+            proppant_lbs = row['Proppant_lbs']
+            water_gal = row['TotalBaseWaterVolume']
+
+            # Flag extreme outliers
+            if job_duration > 365:
+                extreme_outliers += 1
+
+            if job_duration <= 45:
+                # Simple case: all to start quarter
+                results.append({
+                    'Quarter': str(row['JobStartDate'].to_period('Q')),
+                    'Proppant_lbs': proppant_lbs,
+                    'Water_gal': water_gal,
+                    'StateName': row['StateName'],
+                    'CountyName': row['CountyName'],
+                    'DisclosureId': row['DisclosureId'],
+                    'JobDurationDays': job_duration,
+                    'APINumber': row.get('APINumber', None),
+                    'Outlier_LongJob': job_duration > 365
+                })
+            else:
+                # Complex case: distribute across quarters
+                long_jobs += 1
+                proportions = self.distribute_across_quarters(row)
+
+                for quarter, pct in proportions.items():
+                    results.append({
+                        'Quarter': quarter,
+                        'Proppant_lbs': proppant_lbs * pct,
+                        'Water_gal': water_gal * pct,
+                        'StateName': row['StateName'],
+                        'CountyName': row['CountyName'],
+                        'DisclosureId': row['DisclosureId'],
+                        'JobDurationDays': job_duration,
+                        'APINumber': row.get('APINumber', None),
+                        'Outlier_LongJob': job_duration > 365
+                    })
+
+        logger.info(f"Processed {len(disclosure_df):,} disclosures")
+        logger.info(f"  Short jobs (≤45 days): {len(disclosure_df) - long_jobs:,}")
+        logger.info(f"  Long jobs (>45 days): {long_jobs:,}")
+        logger.info(f"  Extreme outliers (>365 days): {extreme_outliers:,}")
+
+        quarterly_df = pd.DataFrame(results)
+        self.quarterly_data = quarterly_df
+
+        return quarterly_df
+
+    # ==================== PHASE 5: REGIONAL AGGREGATION ====================
+
+    # Basin definitions
+    BASIN_DEFINITIONS = {
+        'Permian Basin': {
+            'Texas': [
+                'Andrews', 'Borden', 'Crane', 'Crockett', 'Dawson', 'Ector',
+                'Gaines', 'Glasscock', 'Howard', 'Loving', 'Martin', 'Midland',
+                'Pecos', 'Reeves', 'Terrell', 'Upton', 'Ward', 'Winkler',
+                'Coke', 'Sterling', 'Garza', 'Lynn', 'Mitchell', 'Reagan', 'Tom Green'
+            ],
+            'New Mexico': ['Lea', 'Eddy', 'Chaves']
+        },
+        'Eagle Ford': {
+            'Texas': [
+                'Atascosa', 'Bee', 'DeWitt', 'Dimmit', 'Frio', 'Gonzales',
+                'Karnes', 'La Salle', 'Lavaca', 'Live Oak', 'McMullen',
+                'Webb', 'Wilson', 'Zavala'
+            ]
+        },
+        'Haynesville': {
+            'Texas': ['Harrison', 'Panola', 'Shelby'],
+            'Louisiana': ['Bossier', 'Caddo', 'De Soto', 'Red River']
+        },
+        'Bakken': {
+            'North Dakota': ['Dunn', 'McKenzie', 'Mountrail', 'Williams'],
+            'Montana': ['Richland', 'Roosevelt']
+        },
+        'Marcellus': {
+            'Pennsylvania': ['Allegheny', 'Armstrong', 'Beaver', 'Butler', 'Fayette',
+                           'Greene', 'Washington', 'Westmoreland'],
+            'West Virginia': ['Marshall', 'Wetzel', 'Tyler', 'Doddridge', 'Harrison']
+        }
+    }
+
+    def assign_basin(self, row: pd.Series) -> str:
+        """
+        Assign basin based on state + county.
+
+        Args:
+            row: DataFrame row with StateName and CountyName
+
+        Returns:
+            Basin name or 'Other'
+        """
+        state = row['StateName']
+        county = row['CountyName']
+
+        # Handle missing values
+        if pd.isna(state) or pd.isna(county):
+            return 'Other'
+
+        for basin_name, basin_def in self.BASIN_DEFINITIONS.items():
+            if state in basin_def and county in basin_def[state]:
+                return basin_name
+
+        return 'Other'
+
+    def add_regional_classifications(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add basin classification to each row.
+
+        Args:
+            df: DataFrame with StateName and CountyName
+
+        Returns:
+            DataFrame with Basin column added
+        """
+        logger.info("Adding regional classifications...")
+
+        df['Basin'] = df.apply(self.assign_basin, axis=1)
+
+        # Log basin distribution
+        basin_counts = df['Basin'].value_counts()
+        logger.info("\nBasin distribution:")
+        for basin, count in basin_counts.items():
+            logger.info(f"  {basin}: {count:,} records")
+
+        return df
+
+    def aggregate_by_region(self, df: pd.DataFrame,
+                           group_by: List[str] = ['Quarter', 'Basin']) -> pd.DataFrame:
+        """
+        Aggregate data by specified grouping (Quarter, Basin, State, County, etc.)
+
+        Args:
+            df: Quarterly attributed DataFrame
+            group_by: List of columns to group by
+
+        Returns:
+            Aggregated DataFrame
+        """
+        logger.info(f"Aggregating by: {', '.join(group_by)}")
+
+        aggregated = df.groupby(group_by).agg({
+            'Proppant_lbs': 'sum',
+            'Water_gal': 'sum',
+            'DisclosureId': 'count'  # Well count
+        }).reset_index()
+
+        # Rename for clarity
+        aggregated = aggregated.rename(columns={
+            'DisclosureId': 'Well_count'
+        })
+
+        # Add calculated metrics
+        aggregated['Proppant_MM_lbs'] = aggregated['Proppant_lbs'] / 1_000_000
+        aggregated['Water_MM_gal'] = aggregated['Water_gal'] / 1_000_000
+        aggregated['Avg_Proppant_per_Well_lbs'] = (
+            aggregated['Proppant_lbs'] / aggregated['Well_count']
+        )
+        aggregated['Avg_Water_per_Well_gal'] = (
+            aggregated['Water_gal'] / aggregated['Well_count']
+        )
+
+        return aggregated
+
 
 def main():
     """Main execution function"""
@@ -317,13 +546,75 @@ def main():
     # Phase 3: Calculate proppant
     df_with_proppant = analyzer.add_proppant_calculations(df_clean)
 
-    # Save intermediate results
-    output_path = OUTPUT_DIR / 'processed_data.csv'
-    logger.info(f"\nSaving processed data to {output_path}")
-    df_with_proppant.to_csv(output_path, index=False)
+    # Phase 4: Quarterly attribution
+    logger.info("\n=== PHASE 4: QUARTERLY ATTRIBUTION ===")
+    df_quarterly = analyzer.attribute_to_quarters(df_with_proppant)
+
+    # Phase 5: Regional aggregation
+    logger.info("\n=== PHASE 5: REGIONAL AGGREGATION ===")
+    df_quarterly = analyzer.add_regional_classifications(df_quarterly)
+
+    # Generate aggregated summaries
+    logger.info("\n=== GENERATING SUMMARIES ===")
+
+    # By Quarter and Basin
+    summary_basin = analyzer.aggregate_by_region(
+        df_quarterly,
+        group_by=['Quarter', 'Basin']
+    )
+
+    # By Quarter and State
+    summary_state = analyzer.aggregate_by_region(
+        df_quarterly,
+        group_by=['Quarter', 'StateName']
+    )
+
+    # By Quarter, State, and County
+    summary_county = analyzer.aggregate_by_region(
+        df_quarterly,
+        group_by=['Quarter', 'StateName', 'CountyName']
+    )
+
+    # Permian Basin specific
+    df_permian = df_quarterly[df_quarterly['Basin'] == 'Permian Basin']
+    if len(df_permian) > 0:
+        summary_permian_county = analyzer.aggregate_by_region(
+            df_permian,
+            group_by=['Quarter', 'CountyName']
+        )
+    else:
+        summary_permian_county = None
+        logger.warning("No Permian Basin data found")
+
+    # Save all outputs
+    logger.info("\n=== SAVING OUTPUTS ===")
+
+    output_files = {
+        'quarterly_by_basin.csv': summary_basin,
+        'quarterly_by_state.csv': summary_state,
+        'quarterly_by_county.csv': summary_county,
+        'quarterly_detail.csv': df_quarterly
+    }
+
+    if summary_permian_county is not None:
+        output_files['permian_by_county.csv'] = summary_permian_county
+
+    for filename, data in output_files.items():
+        output_path = OUTPUT_DIR / filename
+        logger.info(f"Saving {filename} ({len(data):,} rows)")
+        data.to_csv(output_path, index=False)
+
+    # Display summary statistics
+    logger.info("\n=== SUMMARY STATISTICS ===")
+    logger.info(f"Total quarters analyzed: {df_quarterly['Quarter'].nunique()}")
+    logger.info(f"Date range: {df_quarterly['Quarter'].min()} to {df_quarterly['Quarter'].max()}")
+    logger.info(f"Total proppant: {summary_basin['Proppant_lbs'].sum() / 1e9:.2f} billion lbs")
+    logger.info(f"Total water: {summary_basin['Water_gal'].sum() / 1e9:.2f} billion gallons")
+    logger.info(f"Total wells: {df_quarterly['DisclosureId'].nunique():,}")
 
     logger.info("\n=== ANALYSIS COMPLETE ===")
-    logger.info("Next steps: Run quarterly attribution and regional analysis")
+    logger.info(f"Output files saved to: {OUTPUT_DIR.absolute()}")
+    logger.info("Next steps: Run interactive dashboard for visualization")
 
 
 if __name__ == '__main__':
