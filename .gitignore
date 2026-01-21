@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Data files (large CSVs)
+data/*.csv
+data/*.zip
+*.csv
+*.zip
+
+# Keep directory structure
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output
+output/*.csv
+!output/.gitkeep
+
+# Logs
+*.log
