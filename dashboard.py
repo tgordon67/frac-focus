@@ -419,7 +419,7 @@ def main():
     """Main execution function"""
     try:
         dashboard = FracFocusDashboard()
-        dashboard.run()
+        dashboard.run(host='0.0.0.0')
     except FileNotFoundError as e:
         logger.error(str(e))
         logger.error("Please run 'python fracfocus_analysis.py' first to generate data files.")
