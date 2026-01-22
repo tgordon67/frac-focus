@@ -132,7 +132,12 @@ class AtlasProductAnalyzer:
         if not normalized:
             return False
 
-        # Check against known patterns
+        # Special case: exact match on standalone "ATLAS" (handles lazy data entry)
+        # But avoid false positives like "ATLAS OIL" or "ATLAS WIRELINE"
+        if normalized == 'ATLAS':
+            return True
+
+        # Check against known patterns (substring match)
         for pattern in self.atlas_supplier_patterns:
             if pattern.upper() in normalized:
                 return True
