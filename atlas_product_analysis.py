@@ -156,7 +156,11 @@ class AtlasProductAnalyzer:
         Returns:
             Standardized product category
         """
-        normalized = self.normalize_product_name(tradename)
+        if pd.isna(tradename):
+            return 'Unknown'
+
+        # Normalize: uppercase and strip
+        normalized = str(tradename).upper().strip()
 
         # Map to standard categories
         if '40/70' in normalized:
