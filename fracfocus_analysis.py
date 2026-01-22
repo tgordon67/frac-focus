@@ -203,16 +203,9 @@ class FracFocusAnalyzer:
         # Remove negative durations (data errors)
         df = df[df['JobDurationDays'] >= 0]
 
-        # 6. Handle TRUE duplicate rows (same disclosure + ingredient)
-        # NOTE: FracFocus data is ingredient-level (many rows per disclosure).
-        # We should NOT dedupe by DisclosureId alone as that deletes valid ingredient rows.
-        # Only dedupe if we have actual duplicate ingredient records.
-        if 'IngredientsId' in df.columns:
-            df = df.drop_duplicates(subset=['DisclosureId', 'IngredientsId'], keep='first')
-        else:
-            # If no IngredientsId, check for exact row duplicates only
-            logger.warning("IngredientsId not found; checking for exact duplicate rows only")
-            df = df.drop_duplicates()
+        # 6. Handle duplicate disclosures (keep first occurrence)
+        # Modern FracFocus data often lacks IngredientsId, so we dedupe by DisclosureId
+        df = df.drop_duplicates(subset=['DisclosureId'], keep='first')
 
         final_count = len(df)
         removed = initial_count - final_count

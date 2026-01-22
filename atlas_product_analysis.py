@@ -120,6 +120,7 @@ class AtlasProductAnalyzer:
     def is_atlas_supplier(self, supplier: str) -> bool:
         """
         Check if supplier is an Atlas entity.
+        Permissive matching: accepts anything with "ATLAS" in the name.
 
         Args:
             supplier: Supplier name
@@ -132,17 +133,8 @@ class AtlasProductAnalyzer:
         if not normalized:
             return False
 
-        # Special case: exact match on standalone "ATLAS" (handles lazy data entry)
-        # But avoid false positives like "ATLAS OIL" or "ATLAS WIRELINE"
-        if normalized == 'ATLAS':
-            return True
-
-        # Check against known patterns (substring match)
-        for pattern in self.atlas_supplier_patterns:
-            if pattern.upper() in normalized:
-                return True
-
-        return False
+        # Accept anything with "ATLAS" substring
+        return 'ATLAS' in normalized
 
     def normalize_product_name(self, tradename: str) -> str:
         """
