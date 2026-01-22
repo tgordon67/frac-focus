@@ -1,0 +1,107 @@
+{
+  "description": "County-to-basin mappings for major U.S. oil and gas basins. This file is user-editable to add or modify basin definitions.",
+  "version": "1.0",
+  "last_updated": "2026-01-21",
+  "basins": {
+    "Permian Basin": {
+      "description": "One of the most prolific oil and gas producing regions in the United States, spanning West Texas and Southeast New Mexico",
+      "primary_plays": ["Wolfcamp", "Bone Spring", "Delaware", "Spraberry"],
+      "states": {
+        "Texas": [
+          "Andrews", "Borden", "Crane", "Crockett", "Dawson", "Ector",
+          "Gaines", "Glasscock", "Howard", "Loving", "Martin", "Midland",
+          "Pecos", "Reeves", "Terrell", "Upton", "Ward", "Winkler",
+          "Coke", "Sterling", "Garza", "Lynn", "Mitchell", "Reagan", "Tom Green"
+        ],
+        "New Mexico": ["Lea", "Eddy", "Chaves"]
+      }
+    },
+    "Eagle Ford": {
+      "description": "Major shale oil and gas play in South Texas",
+      "primary_plays": ["Eagle Ford Shale"],
+      "states": {
+        "Texas": [
+          "Atascosa", "Bee", "DeWitt", "Dimmit", "Frio", "Gonzales",
+          "Karnes", "La Salle", "Lavaca", "Live Oak", "McMullen",
+          "Webb", "Wilson", "Zavala"
+        ]
+      }
+    },
+    "Haynesville": {
+      "description": "Major natural gas producing shale formation in East Texas and Northwest Louisiana",
+      "primary_plays": ["Haynesville Shale", "Bossier Shale"],
+      "states": {
+        "Texas": ["Harrison", "Panola", "Shelby"],
+        "Louisiana": ["Bossier", "Caddo", "De Soto", "Red River"]
+      }
+    },
+    "Bakken": {
+      "description": "Large oil and gas producing formation in North Dakota and Montana",
+      "primary_plays": ["Bakken Shale", "Three Forks"],
+      "states": {
+        "North Dakota": ["Dunn", "McKenzie", "Mountrail", "Williams"],
+        "Montana": ["Richland", "Roosevelt"]
+      }
+    },
+    "Marcellus": {
+      "description": "Vast natural gas producing shale formation in the Appalachian Basin",
+      "primary_plays": ["Marcellus Shale"],
+      "states": {
+        "Pennsylvania": [
+          "Allegheny", "Armstrong", "Beaver", "Butler", "Fayette",
+          "Greene", "Washington", "Westmoreland"
+        ],
+        "West Virginia": ["Marshall", "Wetzel", "Tyler", "Doddridge", "Harrison"]
+      }
+    },
+    "DJ Basin": {
+      "description": "Denver-Julesburg Basin in Colorado and Wyoming",
+      "primary_plays": ["Niobrara", "Codell"],
+      "states": {
+        "Colorado": ["Weld", "Adams", "Arapahoe", "Morgan", "Yuma"],
+        "Wyoming": ["Laramie"]
+      }
+    },
+    "Anadarko Basin": {
+      "description": "Multi-layered sedimentary basin in Oklahoma, Texas, Kansas, and Colorado",
+      "primary_plays": ["Woodford Shale", "STACK", "SCOOP"],
+      "states": {
+        "Oklahoma": [
+          "Blaine", "Canadian", "Custer", "Dewey", "Garvin", "Grady",
+          "Kingfisher", "Major", "McClain", "Stephens"
+        ],
+        "Texas": ["Hemphill", "Lipscomb", "Ochiltree", "Roberts", "Wheeler"]
+      }
+    },
+    "Powder River Basin": {
+      "description": "Major coal and oil producing basin in Wyoming and Montana",
+      "primary_plays": ["Niobrara", "Turner"],
+      "states": {
+        "Wyoming": ["Campbell", "Converse", "Johnson", "Natrona", "Sheridan"],
+        "Montana": ["Big Horn", "Powder River", "Rosebud"]
+      }
+    },
+    "Utica": {
+      "description": "Natural gas producing shale formation underlying the Marcellus",
+      "primary_plays": ["Utica Shale", "Point Pleasant"],
+      "states": {
+        "Ohio": ["Belmont", "Carroll", "Columbiana", "Guernsey", "Harrison", "Jefferson"],
+        "Pennsylvania": ["Butler", "Lawrence", "Mercer"],
+        "West Virginia": ["Doddridge", "Marshall", "Tyler", "Wetzel"]
+      }
+    }
+  },
+  "notes": [
+    "Counties are listed by their official names as they appear in FracFocus data",
+    "Some counties may overlap between basins due to multiple producing formations",
+    "This list focuses on major producing counties and is not exhaustive",
+    "To add a new basin, follow the same JSON structure with state and county arrays",
+    "After modifying this file, restart the analysis to apply changes"
+  ],
+  "usage": {
+    "add_basin": "Add a new basin object under 'basins' with states and counties arrays",
+    "add_county": "Add county name to the appropriate state array (use exact spelling from FracFocus)",
+    "remove_county": "Remove county name from the array",
+    "modify_description": "Update the description field to provide context"
+  }
+}

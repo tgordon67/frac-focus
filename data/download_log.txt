@@ -1,0 +1,22 @@
+2026-01-22 09:32:00,175 - INFO - Force download mode enabled
+2026-01-22 09:32:00,175 - INFO - ============================================================
+2026-01-22 09:32:00,175 - INFO - FracFocus Data Downloader
+2026-01-22 09:32:00,176 - INFO - ============================================================
+2026-01-22 09:32:00,176 - INFO - Starting download from https://www.fracfocusdata.org/digitaldownload/FracFocusCSV.zip
+2026-01-22 09:32:00,176 - INFO - Output path: data/fracfocus_data.zip
+2026-01-22 09:32:00,714 - INFO - File size: 410.38 MB
+2026-01-22 09:32:21,875 - INFO - Progress: 50.00 MB (12.2%)
+2026-01-22 09:32:45,425 - INFO - Progress: 100.00 MB (24.4%)
+2026-01-22 09:33:06,489 - INFO - Progress: 150.00 MB (36.6%)
+2026-01-22 09:33:27,536 - INFO - Progress: 200.00 MB (48.7%)
+2026-01-22 09:33:48,596 - INFO - Progress: 250.00 MB (60.9%)
+2026-01-22 09:34:09,623 - INFO - Progress: 300.00 MB (73.1%)
+2026-01-22 09:34:30,654 - INFO - Progress: 350.00 MB (85.3%)
+2026-01-22 09:34:51,695 - INFO - Progress: 400.00 MB (97.5%)
+2026-01-22 09:34:56,069 - INFO - Download complete: 410.38 MB
+2026-01-22 09:34:56,070 - INFO - ✓ Data download successful
+2026-01-22 09:34:56,071 - INFO - File saved to: /home/user/frac-focus/data/fracfocus_data.zip
+2026-01-22 09:34:56,071 - INFO - 
+Next steps:
+2026-01-22 09:34:56,071 - INFO -   1. Run: python fracfocus_analysis.py
+2026-01-22 09:34:56,071 - INFO -   2. Run: python dashboard.py
