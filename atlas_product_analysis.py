@@ -521,6 +521,17 @@ def main():
     # Add time dimensions
     atlas_df = analyzer.add_time_dimensions(atlas_df)
 
+    # Save verification file FIRST (before aggregation)
+    logger.info("\n=== SAVING VERIFICATION FILE ===")
+    verification_columns = ['DisclosureId', 'Year', 'Quarter', 'Year_Quarter', 'Volume_tonnes']
+    verification_df = atlas_df[verification_columns].copy()
+    verification_df = verification_df.sort_values(['Year', 'Quarter', 'DisclosureId'])
+
+    verification_path = OUTPUT_DIR / 'atlas_verification_disclosures.csv'
+    logger.info(f"Saving verification file: {verification_path}")
+    verification_df.to_csv(verification_path, index=False)
+    logger.info(f"Verification file has {len(verification_df):,} disclosure records")
+
     # Aggregate by time and product
     aggregated_df = analyzer.aggregate_by_time_and_product(atlas_df)
 
