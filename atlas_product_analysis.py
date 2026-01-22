@@ -58,21 +58,21 @@ class AtlasProductAnalyzer:
         # Products Atlas DEFINITELY produces (from your list)
         self.atlas_products_definite = {
             # Primary mesh sizes
-            '40/70', '100', '100M', '100 MESH',
-            '40/140 BROWN DRY', '40/140 BROWN DAMP',
+            '40/70', '40/70 MESH', '100', '100M', '100 MESH',
+            '40/140', '40/140 MESH',  # Added standalone 40/140
+            '40/140 BROWN DRY', '40/140 BROWN DAMP', '40/140 BROWN',
             '100 MESH PROPPANT', 'SAND (100 MESH PROPPANT)', 'SAND (40/70 PROPPANT)',
-            '40/70 MESH',
             # Permian-specific
-            'SAND, PERMIAN 40/140', '100 MESH PERMIAN',
+            'SAND, PERMIAN 40/140', '100 MESH PERMIAN', 'PERMIAN',
             'SAND-LOCAL, 100M', 'SAND-LOCAL, 40/70',
-            'WEST TX 100 MESH', 'WEST TX 40/70',
+            'WEST TX 100 MESH', 'WEST TX 40/70', 'WEST TX',
             'CAPITAL SAND 40/140',
             # Regional identifiers
-            'SAND - REGIONAL', '40/70 REGIONAL', '100 MESH REGIONAL SAND',
-            'SAND, COMMON BROWN 100 MESH',
+            'SAND - REGIONAL', 'REGIONAL', '40/70 REGIONAL', '100 MESH REGIONAL SAND',
+            'SAND, COMMON BROWN 100 MESH', 'BROWN',
             'SAND, SAN ANTONIO, 40/70', 'SAND, SAN ANTONIO - 100M',
             # Generic (but Atlas does produce these)
-            'SAND', 'SILICA SAND', 'SAND (PROPPANT)',
+            'SAND', 'SILICA SAND', 'SAND (PROPPANT)', 'PROPPANT',
             'CRYSTALLINE SILICA QUARTZ',
             # Ambiguous but likely Atlas
             'SAND,NATIVE,100 MESH', 'SAND (40/140 PROPPANT)',
@@ -155,15 +155,17 @@ class AtlasProductAnalyzer:
         # Convert to uppercase and strip
         normalized = str(tradename).upper().strip()
 
-        # Remove common prefixes that don't add meaning
+        # Remove common delimiters and clean up, but preserve key terms
         normalized = normalized.replace('SAND (', '').replace(')', '')
-        normalized = normalized.replace('SAND - ', '')
+        # Don't strip "SAND - " as it can remove meaningful context
 
         return normalized
 
     def is_atlas_product(self, tradename: str) -> bool:
         """
         Check if product is something Atlas produces.
+
+        DEPRECATED: Use is_valid_atlas_product_for_supplier instead.
 
         Args:
             tradename: Product/TradeName
@@ -193,6 +195,57 @@ class AtlasProductAnalyzer:
         # If contains "RESIN" or "CERAMIC", exclude
         if any(x in normalized for x in ['RESIN', 'CERAMIC', 'CARBO']):
             return False
+
+        return False
+
+    def is_valid_atlas_product_for_supplier(self, tradename: str, supplier: str) -> bool:
+        """
+        Check if product is valid for the given supplier.
+
+        If supplier is Atlas, we trust the supplier field and only check
+        if the product is in Atlas's documented product list.
+        This handles cases where data entry might be lazy/generic.
+
+        Args:
+            tradename: Product/TradeName
+            supplier: Supplier name
+
+        Returns:
+            True if valid Atlas product for this supplier
+        """
+        normalized_product = self.normalize_product_name(tradename)
+
+        if not normalized_product:
+            return False
+
+        # Check if supplier is Atlas
+        is_atlas_supplier_flag = self.is_atlas_supplier(supplier)
+
+        # If supplier is NOT Atlas, exclude immediately
+        # We're looking for Atlas products only
+        if not is_atlas_supplier_flag:
+            return False
+
+        # Supplier IS Atlas - now validate the product
+        # Still exclude obvious non-Atlas products even if supplier says Atlas
+        # (handles data entry errors where wrong supplier was selected)
+
+        # Exclude Northern White sand (Atlas makes brown sand)
+        if 'WHITE' in normalized_product and not any(x in normalized_product for x in ['WHITEFACE', 'WHITE OAK']):
+            return False
+
+        # Exclude ceramic proppants
+        if any(x in normalized_product for x in ['RESIN', 'CERAMIC', 'CARBO', 'GARNET', 'PEARL']):
+            return False
+
+        # Check if product is in Atlas's documented product list
+        for product_pattern in self.atlas_products_definite:
+            if product_pattern.upper() in normalized_product:
+                return True
+
+        # Even if not in definite list, if it's generic sand terms and supplier is Atlas, include it
+        if any(term in normalized_product for term in ['SAND', 'SILICA', 'PROPPANT', 'MESH']):
+            return True
 
         return False
 
@@ -254,8 +307,12 @@ class AtlasProductAnalyzer:
                 return pd.DataFrame()
 
             # Filter to Atlas products
+            # Use supplier-aware validation: if supplier is Atlas, trust it
             if 'TradeName' in df.columns:
-                df['Is_Atlas_Product'] = df['TradeName'].apply(self.is_atlas_product)
+                df['Is_Atlas_Product'] = df.apply(
+                    lambda row: self.is_valid_atlas_product_for_supplier(row['TradeName'], row['Supplier']),
+                    axis=1
+                )
                 df = df[df['Is_Atlas_Product']]
                 logger.info(f"  Atlas product records: {len(df):,}")
             else:
