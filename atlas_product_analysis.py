@@ -40,214 +40,111 @@ class AtlasProductAnalyzer:
     """
 
     def __init__(self):
-        # Atlas supplier name variations (from 10-K Exhibit 21.1)
-        self.atlas_supplier_patterns = [
-            'ATLAS ENERGY SOLUTIONS',
-            'ATLAS SAND COMPANY',
-            'ATLAS SAND CO',
-            'ATLAS SAND OPERATING',
-            'ATLAS SAND',
-            'AESI HOLDINGS',
-            'OLC KERMIT',
-            'OLC MONAHANS',
-            'FOUNTAINHEAD LOGISTICS',
-            # Legacy/brand names
-            'CAPITAL SAND',  # Legacy brand
-        ]
-
-        # Products Atlas DEFINITELY produces (from your list)
-        self.atlas_products_definite = {
+        # Products Atlas produces (from your approved list)
+        # These are the ONLY products we'll count as Atlas
+        self.atlas_approved_products = {
             # Primary mesh sizes
-            '40/70', '40/70 MESH', '100', '100M', '100 MESH',
-            '40/140', '40/140 MESH',  # Added standalone 40/140
-            '40/140 BROWN DRY', '40/140 BROWN DAMP', '40/140 BROWN',
-            '100 MESH PROPPANT', 'SAND (100 MESH PROPPANT)', 'SAND (40/70 PROPPANT)',
+            '40/70',
+            '100',
+            '100M',
+            '100 MESH',
+            '40/140 BROWN DRY',
+            '40/140 BROWN DAMP',
+            '100 MESH PROPPANT',
+            'SAND (100 MESH PROPPANT)',
+            'SAND (40/70 PROPPANT)',
+            '40/70 MESH',
             # Permian-specific
-            'SAND, PERMIAN 40/140', '100 MESH PERMIAN', 'PERMIAN',
-            'SAND-LOCAL, 100M', 'SAND-LOCAL, 40/70',
-            'WEST TX 100 MESH', 'WEST TX 40/70', 'WEST TX',
+            'SAND, PERMIAN 40/140',
+            '100 MESH PERMIAN',
+            'SAND-LOCAL, 100M',
+            'SAND-LOCAL, 40/70',
+            'WEST TX 100 MESH',
+            'WEST TX 40/70',
             'CAPITAL SAND 40/140',
-            # Regional identifiers
-            'SAND - REGIONAL', 'REGIONAL', '40/70 REGIONAL', '100 MESH REGIONAL SAND',
-            'SAND, COMMON BROWN 100 MESH', 'BROWN',
-            'SAND, SAN ANTONIO, 40/70', 'SAND, SAN ANTONIO - 100M',
-            # Generic (but Atlas does produce these)
-            'SAND', 'SILICA SAND', 'SAND (PROPPANT)', 'PROPPANT',
+            # Generic descriptors
+            'SAND',
+            'SILICA SAND',
+            'SAND (PROPPANT)',
+            'SAND ""',  # Blank/generic
             'CRYSTALLINE SILICA QUARTZ',
-            # Ambiguous but likely Atlas
-            'SAND,NATIVE,100 MESH', 'SAND (40/140 PROPPANT)',
+            # Regional/Brown sand identifiers
+            'SAND - REGIONAL',
+            '40/70 REGIONAL',
+            '100 MESH REGIONAL SAND',
+            'SAND, COMMON BROWN 100 MESH',
+            # Permian/Local specific
+            'SAND, SAN ANTONIO, 40/70',
+            'SAND, SAN ANTONIO - 100M',
         }
-
-        # Products Atlas DOES NOT produce (exclusion list)
-        self.atlas_products_exclude = {
-            # Northern White Sand
-            'SAND-COMMON WHITE-100 MESH', 'SAND-PREMIUM WHITE-40/70', 'SAND-PREMIUM WHITE-30/50',
-            'SAND-COMMON WHITE, 100M', 'SAND-COMMON WHITE 40/70',
-            '100 MESH WESTERN', '100 MESH POWDER RIVER',
-            # Resin-coated
-            'GARNET', 'PEARL', 'CHROME', 'RESIN COATED PROPPANT',
-            'SAND-CRC-40/70', 'CRC',
-            # Ceramic
-            'CARBOLITE', 'CERAMIC PROPPANT', 'DEEPROP',
-            # Specialty
-            'NANOMITE', 'MP-D1', 'S901',
-            # Non-proppant
-            'PETCOKE', 'PETROLEUM COKE', 'SURFACTANT',
-        }
-
-    def normalize_supplier_name(self, supplier: str) -> str:
-        """
-        Normalize supplier name for matching.
-
-        Args:
-            supplier: Raw supplier string
-
-        Returns:
-            Normalized supplier string
-        """
-        if pd.isna(supplier):
-            return ''
-
-        # Convert to uppercase and strip
-        normalized = str(supplier).upper().strip()
-
-        # Remove common suffixes
-        normalized = normalized.replace(' LLC', '').replace(' INC', '').replace(' L.L.C.', '')
-        normalized = normalized.replace(',', '').replace('.', '')
-
-        return normalized
 
     def is_atlas_supplier(self, supplier: str) -> bool:
         """
-        Check if supplier is an Atlas entity.
+        Check if supplier contains 'atlas' (case insensitive).
+
+        Simple rule: if 'atlas' appears anywhere in the supplier name, it's Atlas.
 
         Args:
             supplier: Supplier name
 
         Returns:
-            True if Atlas entity
+            True if supplier contains 'atlas'
         """
-        normalized = self.normalize_supplier_name(supplier)
-
-        if not normalized:
+        if pd.isna(supplier):
             return False
 
-        # Check against known patterns
-        for pattern in self.atlas_supplier_patterns:
-            if pattern.upper() in normalized:
-                return True
-
-        return False
-
-    def normalize_product_name(self, tradename: str) -> str:
-        """
-        Normalize product/tradename for matching.
-
-        Args:
-            tradename: Raw TradeName string
-
-        Returns:
-            Normalized product string
-        """
-        if pd.isna(tradename):
-            return ''
-
-        # Convert to uppercase and strip
-        normalized = str(tradename).upper().strip()
-
-        # Remove common delimiters and clean up, but preserve key terms
-        normalized = normalized.replace('SAND (', '').replace(')', '')
-        # Don't strip "SAND - " as it can remove meaningful context
-
-        return normalized
+        # Simple check: does it contain 'atlas'?
+        return 'atlas' in str(supplier).lower()
 
     def is_atlas_product(self, tradename: str) -> bool:
         """
-        Check if product is something Atlas produces.
+        Check if product is in the approved Atlas product list.
 
-        DEPRECATED: Use is_valid_atlas_product_for_supplier instead.
+        Simple rule: product must match one of the approved products exactly (case insensitive).
 
         Args:
             tradename: Product/TradeName
 
         Returns:
-            True if Atlas product, False if excluded or unknown
+            True if product is in approved list
         """
-        normalized = self.normalize_product_name(tradename)
-
-        if not normalized:
+        if pd.isna(tradename):
             return False
 
-        # Check exclusions first (more specific)
-        for exclude_pattern in self.atlas_products_exclude:
-            if exclude_pattern.upper() in normalized:
-                return False
+        # Normalize: uppercase and strip
+        normalized = str(tradename).upper().strip()
 
-        # Check if it's a known Atlas product
-        for product_pattern in self.atlas_products_definite:
-            if product_pattern.upper() in normalized:
+        # Check if it matches any approved product
+        for approved_product in self.atlas_approved_products:
+            if approved_product.upper() == normalized:
                 return True
-
-        # If contains "WHITE" (and not in definite list), exclude
-        if 'WHITE' in normalized and 'COMMON WHITE' not in self.atlas_products_definite:
-            return False
-
-        # If contains "RESIN" or "CERAMIC", exclude
-        if any(x in normalized for x in ['RESIN', 'CERAMIC', 'CARBO']):
-            return False
 
         return False
 
-    def is_valid_atlas_product_for_supplier(self, tradename: str, supplier: str) -> bool:
+    def is_valid_atlas_record(self, tradename: str, supplier: str) -> bool:
         """
-        Check if product is valid for the given supplier.
+        Check if this is a valid Atlas record.
 
-        If supplier is Atlas, we trust the supplier field and only check
-        if the product is in Atlas's documented product list.
-        This handles cases where data entry might be lazy/generic.
+        Simple rules:
+        1. Supplier must contain 'atlas' (case insensitive)
+        2. Product must be in the approved product list
 
         Args:
             tradename: Product/TradeName
             supplier: Supplier name
 
         Returns:
-            True if valid Atlas product for this supplier
+            True if both conditions met
         """
-        normalized_product = self.normalize_product_name(tradename)
-
-        if not normalized_product:
+        # Rule 1: Supplier contains 'atlas'
+        if not self.is_atlas_supplier(supplier):
             return False
 
-        # Check if supplier is Atlas
-        is_atlas_supplier_flag = self.is_atlas_supplier(supplier)
-
-        # If supplier is NOT Atlas, exclude immediately
-        # We're looking for Atlas products only
-        if not is_atlas_supplier_flag:
+        # Rule 2: Product is in approved list
+        if not self.is_atlas_product(tradename):
             return False
 
-        # Supplier IS Atlas - now validate the product
-        # Still exclude obvious non-Atlas products even if supplier says Atlas
-        # (handles data entry errors where wrong supplier was selected)
-
-        # Exclude Northern White sand (Atlas makes brown sand)
-        if 'WHITE' in normalized_product and not any(x in normalized_product for x in ['WHITEFACE', 'WHITE OAK']):
-            return False
-
-        # Exclude ceramic proppants
-        if any(x in normalized_product for x in ['RESIN', 'CERAMIC', 'CARBO', 'GARNET', 'PEARL']):
-            return False
-
-        # Check if product is in Atlas's documented product list
-        for product_pattern in self.atlas_products_definite:
-            if product_pattern.upper() in normalized_product:
-                return True
-
-        # Even if not in definite list, if it's generic sand terms and supplier is Atlas, include it
-        if any(term in normalized_product for term in ['SAND', 'SILICA', 'PROPPANT', 'MESH']):
-            return True
-
-        return False
+        return True
 
     def standardize_product_category(self, tradename: str) -> str:
         """
@@ -297,26 +194,26 @@ class AtlasProductAnalyzer:
                 df = df[df['Purpose'].str.contains('Proppant', case=False, na=False)]
                 logger.info(f"  Proppant records: {len(df):,}")
 
-            # Filter to Atlas suppliers
-            if 'Supplier' in df.columns:
-                df['Is_Atlas'] = df['Supplier'].apply(self.is_atlas_supplier)
-                df = df[df['Is_Atlas']]
-                logger.info(f"  Atlas supplier records: {len(df):,}")
-            else:
-                logger.warning(f"  No Supplier column in {file_path.name}")
-                return pd.DataFrame()
-
-            # Filter to Atlas products
-            # Use supplier-aware validation: if supplier is Atlas, trust it
-            if 'TradeName' in df.columns:
-                df['Is_Atlas_Product'] = df.apply(
-                    lambda row: self.is_valid_atlas_product_for_supplier(row['TradeName'], row['Supplier']),
+            # Filter to Atlas records (supplier contains 'atlas' AND product in approved list)
+            if 'Supplier' in df.columns and 'TradeName' in df.columns:
+                df['Is_Atlas_Record'] = df.apply(
+                    lambda row: self.is_valid_atlas_record(row['TradeName'], row['Supplier']),
                     axis=1
                 )
-                df = df[df['Is_Atlas_Product']]
-                logger.info(f"  Atlas product records: {len(df):,}")
+
+                # Log intermediate counts
+                atlas_suppliers = df['Supplier'].apply(self.is_atlas_supplier).sum()
+                logger.info(f"  Records with 'atlas' in supplier: {atlas_suppliers:,}")
+
+                # Filter to valid Atlas records
+                df = df[df['Is_Atlas_Record']]
+                logger.info(f"  Valid Atlas records (supplier + approved product): {len(df):,}")
             else:
-                logger.warning(f"  No TradeName column in {file_path.name}")
+                if 'Supplier' not in df.columns:
+                    logger.warning(f"  No Supplier column in {file_path.name}")
+                if 'TradeName' not in df.columns:
+                    logger.warning(f"  No TradeName column in {file_path.name}")
+                return pd.DataFrame()
 
             # Keep only relevant columns
             columns_to_keep = [

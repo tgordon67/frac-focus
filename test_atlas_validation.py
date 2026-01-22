@@ -1,8 +1,9 @@
 """
 Tests for Atlas product validation logic.
 
-Tests the supplier-aware validation: if supplier field says "Atlas",
-trust it and include products that Atlas is documented as producing.
+New simple rule:
+- Supplier must contain 'atlas' (case insensitive)
+- Product must match approved product list exactly
 """
 
 import sys
@@ -12,84 +13,90 @@ sys.path.insert(0, str(Path(__file__).parent))
 from atlas_product_analysis import AtlasProductAnalyzer
 
 
-def test_atlas_supplier_validation():
-    """Test that Atlas supplier field is trusted for documented products."""
+def test_atlas_validation():
+    """Test simple Atlas validation: supplier contains 'atlas' + product in approved list."""
     analyzer = AtlasProductAnalyzer()
 
     print("=" * 80)
-    print("TESTING ATLAS SUPPLIER-AWARE PRODUCT VALIDATION")
+    print("TESTING SIMPLIFIED ATLAS VALIDATION")
+    print("Rule 1: Supplier must contain 'atlas'")
+    print("Rule 2: Product must be in approved list (exact match)")
     print("=" * 80)
     print()
 
     test_cases = [
         # (supplier, product, expected_result, description)
 
-        # Case 1: Atlas supplier + generic sand (should be INCLUDED)
+        # Case 1: Atlas supplier + approved product
         ("ATLAS SAND COMPANY", "SAND", True,
-         "Atlas + generic 'SAND' → INCLUDE (trust supplier)"),
+         "Atlas + 'SAND' → INCLUDE (in approved list)"),
 
-        # Case 2: Atlas supplier + specific mesh size (should be INCLUDED)
+        # Case 2: Atlas supplier + approved mesh size
         ("ATLAS SAND COMPANY", "40/70", True,
-         "Atlas + '40/70' → INCLUDE (documented Atlas product)"),
+         "Atlas + '40/70' → INCLUDE (in approved list)"),
 
-        # Case 3: Atlas supplier + 100 mesh (should be INCLUDED)
+        # Case 3: Atlas supplier + approved 100 mesh
         ("ATLAS SAND COMPANY", "100 MESH", True,
-         "Atlas + '100 MESH' → INCLUDE (documented Atlas product)"),
+         "Atlas + '100 MESH' → INCLUDE (in approved list)"),
 
-        # Case 4: Atlas supplier + regional sand (should be INCLUDED)
+        # Case 4: Atlas supplier + approved regional sand
         ("ATLAS ENERGY SOLUTIONS", "SAND - REGIONAL", True,
-         "Atlas + 'REGIONAL' → INCLUDE (documented Atlas product)"),
+         "Atlas + 'SAND - REGIONAL' → INCLUDE (in approved list)"),
 
-        # Case 5: Atlas supplier + Permian sand (should be INCLUDED)
+        # Case 5: Atlas supplier + approved Permian sand
         ("ATLAS SAND CO", "SAND, PERMIAN 40/140", True,
-         "Atlas + 'PERMIAN' → INCLUDE (documented Atlas product)"),
+         "Atlas + 'SAND, PERMIAN 40/140' → INCLUDE (in approved list)"),
 
-        # Case 6: Atlas supplier + West TX (should be INCLUDED)
+        # Case 6: Atlas supplier + approved West TX
         ("ATLAS SAND COMPANY LLC", "WEST TX 100 MESH", True,
-         "Atlas + 'WEST TX' → INCLUDE (documented Atlas product)"),
+         "Atlas + 'WEST TX 100 MESH' → INCLUDE (in approved list)"),
 
-        # Case 7: Atlas supplier + generic but lazy entry (should be INCLUDED)
+        # Case 7: Atlas supplier + approved silica sand
         ("ATLAS SAND", "SILICA SAND", True,
-         "Atlas + 'SILICA SAND' → INCLUDE (trust supplier, generic sand)"),
+         "Atlas + 'SILICA SAND' → INCLUDE (in approved list)"),
 
-        # Case 8: Atlas supplier + CERAMIC (should be EXCLUDED even with Atlas)
+        # Case 8: Atlas supplier + NOT in approved list
         ("ATLAS SAND COMPANY", "CERAMIC PROPPANT", False,
-         "Atlas + 'CERAMIC' → EXCLUDE (Atlas doesn't make ceramic)"),
+         "Atlas + 'CERAMIC PROPPANT' → EXCLUDE (not in approved list)"),
 
-        # Case 9: Atlas supplier + RESIN COATED (should be EXCLUDED)
+        # Case 9: Atlas supplier + NOT in approved list
         ("ATLAS SAND COMPANY", "RESIN COATED PROPPANT", False,
-         "Atlas + 'RESIN COATED' → EXCLUDE (Atlas doesn't make RCS)"),
+         "Atlas + 'RESIN COATED PROPPANT' → EXCLUDE (not in approved list)"),
 
-        # Case 10: Atlas supplier + CARBOLITE (should be EXCLUDED)
+        # Case 10: Atlas supplier + NOT in approved list
         ("ATLAS ENERGY SOLUTIONS", "CARBOLITE", False,
-         "Atlas + 'CARBOLITE' → EXCLUDE (Atlas doesn't make ceramic)"),
+         "Atlas + 'CARBOLITE' → EXCLUDE (not in approved list)"),
 
-        # Case 11: Non-Atlas supplier + sand (should be EXCLUDED)
+        # Case 11: Non-Atlas supplier (missing 'atlas')
         ("SOME OTHER SAND COMPANY", "SAND", False,
-         "Non-Atlas + 'SAND' → EXCLUDE (not Atlas supplier)"),
+         "Non-Atlas + 'SAND' → EXCLUDE (no 'atlas' in supplier)"),
 
-        # Case 12: Non-Atlas supplier + 40/70 (should be EXCLUDED)
-        ("US SILICA", "40/70 MESH", False,
-         "Non-Atlas + '40/70' → EXCLUDE (not Atlas supplier)"),
+        # Case 12: Non-Atlas supplier (missing 'atlas')
+        ("US SILICA", "40/70", False,
+         "Non-Atlas + '40/70' → EXCLUDE (no 'atlas' in supplier)"),
 
-        # Case 13: Capital Sand (legacy Atlas brand) + product
-        ("CAPITAL SAND", "40/140 BROWN", True,
-         "Capital Sand + '40/140' → INCLUDE (Capital is Atlas legacy brand)"),
+        # Case 13: Has 'atlas' in name + approved product
+        ("atlas sand llc", "100 MESH", True,
+         "lowercase 'atlas' + '100 MESH' → INCLUDE (contains 'atlas')"),
 
-        # Case 14: Atlas subsidiary + product
-        ("OLC KERMIT", "100 MESH", True,
-         "OLC Kermit + '100 MESH' → INCLUDE (OLC Kermit is Atlas subsidiary)"),
+        # Case 14: Has 'ATLAS' in name + approved product
+        ("SOME ATLAS COMPANY", "SAND", True,
+         "'ATLAS' anywhere in name + 'SAND' → INCLUDE (contains 'atlas')"),
 
-        # Case 15: Atlas + Northern White (should be EXCLUDED even with Atlas)
-        ("ATLAS SAND COMPANY", "SAND-PREMIUM WHITE-40/70", False,
-         "Atlas + 'PREMIUM WHITE' → EXCLUDE (Atlas doesn't produce Northern White)"),
+        # Case 15: Has 'atlas' but product not approved
+        ("atlas company", "NORTHERN WHITE SAND", False,
+         "Contains 'atlas' but product not in approved list → EXCLUDE"),
+
+        # Case 16: Case insensitive product matching
+        ("Atlas Energy", "sand", True,
+         "Atlas + 'sand' (lowercase) → INCLUDE (case insensitive matching)"),
     ]
 
     passed = 0
     failed = 0
 
     for supplier, product, expected, description in test_cases:
-        result = analyzer.is_valid_atlas_product_for_supplier(product, supplier)
+        result = analyzer.is_valid_atlas_record(product, supplier)
         status = "✓ PASS" if result == expected else "✗ FAIL"
 
         if result == expected:
@@ -111,5 +118,5 @@ def test_atlas_supplier_validation():
 
 
 if __name__ == '__main__':
-    success = test_atlas_supplier_validation()
+    success = test_atlas_validation()
     sys.exit(0 if success else 1)
