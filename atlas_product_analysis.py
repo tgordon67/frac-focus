@@ -491,7 +491,8 @@ class AtlasProductAnalyzer:
 
             for (year, quarter), volume in quarterly.items():
                 jobs = df[(df['Year'] == year) & (df['Quarter'] == quarter)]['Job_Count'].sum()
-                f.write(f"{year:.0f}Q{quarter:.0f:<13} {volume:>15,.0f}     {jobs:>7,.0f}\n")
+                quarter_str = f"{int(year)}Q{int(quarter)}"
+                f.write(f"{quarter_str:<15} {volume:>15,.0f}     {jobs:>7,.0f}\n")
 
             f.write("\n" + "=" * 80 + "\n")
 
