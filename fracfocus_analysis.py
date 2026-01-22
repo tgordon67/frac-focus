@@ -203,8 +203,16 @@ class FracFocusAnalyzer:
         # Remove negative durations (data errors)
         df = df[df['JobDurationDays'] >= 0]
 
-        # 6. Handle duplicate disclosures (keep first occurrence)
-        df = df.drop_duplicates(subset=['DisclosureId'], keep='first')
+        # 6. Handle TRUE duplicate rows (same disclosure + ingredient)
+        # NOTE: FracFocus data is ingredient-level (many rows per disclosure).
+        # We should NOT dedupe by DisclosureId alone as that deletes valid ingredient rows.
+        # Only dedupe if we have actual duplicate ingredient records.
+        if 'IngredientsId' in df.columns:
+            df = df.drop_duplicates(subset=['DisclosureId', 'IngredientsId'], keep='first')
+        else:
+            # If no IngredientsId, check for exact row duplicates only
+            logger.warning("IngredientsId not found; checking for exact duplicate rows only")
+            df = df.drop_duplicates()
 
         final_count = len(df)
         removed = initial_count - final_count
@@ -220,10 +228,13 @@ class FracFocusAnalyzer:
         """
         Calculate proppant mass for a single disclosure.
 
-        Logic:
-        - PercentHFJob is % by MASS of total fluid
-        - Total fluid mass ≈ TotalBaseWaterVolume × water_density (8.34 lbs/gal)
-        - Proppant mass = (PercentHFJob / 100) × Total fluid mass
+        Logic (in priority order):
+        1. If MassIngredient is available and populated for proppant rows:
+           - Use sum of MassIngredient (most accurate - directly reported)
+        2. Otherwise, fall back to proxy method:
+           - PercentHFJob is % by MASS of total fluid
+           - Total fluid mass ≈ TotalBaseWaterVolume × water_density (8.34 lbs/gal)
+           - Proppant mass = (PercentHFJob / 100) × Total fluid mass
 
         Args:
             disclosure_group: All rows for a single DisclosureId
@@ -231,12 +242,6 @@ class FracFocusAnalyzer:
         Returns:
             Proppant mass in pounds
         """
-        # Get total water volume (same for all rows in this disclosure)
-        water_volume_gal = disclosure_group['TotalBaseWaterVolume'].iloc[0]
-
-        # Approximate total fluid mass (water density ≈ 8.34 lbs/gal)
-        total_fluid_mass_lbs = water_volume_gal * 8.34
-
         # Get proppant rows
         proppant_rows = disclosure_group[
             disclosure_group['Purpose'].str.contains('Proppant', case=False, na=False)
@@ -244,6 +249,26 @@ class FracFocusAnalyzer:
 
         if len(proppant_rows) == 0:
             return 0.0
+
+        # PRIORITY 1: Use MassIngredient if available (most accurate)
+        if 'MassIngredient' in proppant_rows.columns:
+            mass_values = proppant_rows['MassIngredient']
+
+            # Check if MassIngredient is populated for majority of proppant rows
+            populated_pct = mass_values.notna().sum() / len(mass_values)
+
+            if populated_pct > 0.5:  # If >50% of proppant rows have MassIngredient
+                total_mass = mass_values.sum()
+
+                if pd.notna(total_mass) and total_mass > 0:
+                    return float(total_mass)
+
+        # PRIORITY 2: Fall back to percentage-based proxy method
+        # Get total water volume (same for all rows in this disclosure)
+        water_volume_gal = disclosure_group['TotalBaseWaterVolume'].iloc[0]
+
+        # Approximate total fluid mass (water density ≈ 8.34 lbs/gal)
+        total_fluid_mass_lbs = water_volume_gal * 8.34
 
         # Sum all proppant percentages
         total_proppant_pct = proppant_rows['PercentHFJob'].sum()
@@ -268,6 +293,15 @@ class FracFocusAnalyzer:
             DataFrame with Proppant_lbs column added
         """
         logger.info("Calculating proppant mass for each disclosure...")
+
+        # Check if MassIngredient is available
+        has_mass_ingredient = 'MassIngredient' in df.columns
+        if has_mass_ingredient:
+            proppant_df = df[df['Purpose'].str.contains('Proppant', case=False, na=False)]
+            mass_completeness = proppant_df['MassIngredient'].notna().sum() / len(proppant_df) if len(proppant_df) > 0 else 0
+            logger.info(f"MassIngredient field present: {mass_completeness:.1%} of proppant rows populated")
+        else:
+            logger.warning("MassIngredient field not found; using percentage-based proxy for all calculations")
 
         # Calculate proppant for each disclosure
         proppant_by_disclosure = df.groupby('DisclosureId').apply(
