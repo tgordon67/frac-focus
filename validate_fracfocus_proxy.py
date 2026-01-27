@@ -144,27 +144,37 @@ def main():
         logger.error("No 2023 Atlas records found!")
         return
 
-    # Deduplicate by DisclosureId (keep first occurrence)
-    initial_count = len(atlas_2023)
-    atlas_2023 = atlas_2023.drop_duplicates(subset=['DisclosureId'], keep='first')
-    logger.info(f"After deduplication: {len(atlas_2023):,} unique disclosures")
-    logger.info(f"Removed {initial_count - len(atlas_2023):,} duplicate records")
+    # Calculate proppant mass for EACH ingredient row (do NOT deduplicate!)
+    # Each row represents a different proppant product in the same well
+    logger.info("\nCalculating proppant mass for each ingredient row...")
+    logger.info(f"Total ingredient rows: {len(atlas_2023):,}")
 
-    # Calculate proppant mass for each disclosure
-    logger.info("\nCalculating proppant mass...")
     atlas_2023['Proppant_Mass_Lbs'] = atlas_2023.apply(calculate_proppant_mass, axis=1)
 
     # Remove records with zero mass
-    valid_records = atlas_2023[atlas_2023['Proppant_Mass_Lbs'] > 0]
-    logger.info(f"Valid mass calculations: {len(valid_records):,}")
-    logger.info(f"Records with zero mass: {len(atlas_2023) - len(valid_records):,}")
+    atlas_2023 = atlas_2023[atlas_2023['Proppant_Mass_Lbs'] > 0]
+    logger.info(f"Valid ingredient rows with mass: {len(atlas_2023):,}")
 
     # Convert to tonnes
-    valid_records['Proppant_Tonnes'] = valid_records['Proppant_Mass_Lbs'] / LBS_PER_TON
+    atlas_2023['Proppant_Tonnes'] = atlas_2023['Proppant_Mass_Lbs'] / LBS_PER_TON
+
+    # Group by DisclosureId and sum all proppant ingredients per well
+    logger.info("\nAggregating proppant by well (summing all ingredient rows)...")
+    well_totals = atlas_2023.groupby('DisclosureId').agg({
+        'Proppant_Tonnes': 'sum',
+        'JobStartDate': 'first',
+        'Supplier': 'first'
+    }).reset_index()
+
+    logger.info(f"Unique wells: {len(well_totals):,}")
+    logger.info(f"Average proppant per well: {well_totals['Proppant_Tonnes'].mean():,.0f} tonnes")
 
     # Calculate totals
-    total_tonnes = valid_records['Proppant_Tonnes'].sum()
+    total_tonnes = well_totals['Proppant_Tonnes'].sum()
     implied_revenue = total_tonnes * PRICE_PER_TON
+
+    # Use well_totals for detailed output
+    valid_records = well_totals
 
     # Calculate accuracy
     revenue_delta = implied_revenue - ACTUAL_PRODUCT_SALES_2023
@@ -222,7 +232,7 @@ def main():
     output_path.parent.mkdir(exist_ok=True)
 
     valid_records[['DisclosureId', 'JobStartDate', 'Supplier',
-                   'Proppant_Mass_Lbs', 'Proppant_Tonnes']].to_csv(output_path, index=False)
+                   'Proppant_Tonnes']].to_csv(output_path, index=False)
     logger.info(f"\nDetailed results saved to: {output_path}")
 
     logger.info("\n" + "=" * 80)
