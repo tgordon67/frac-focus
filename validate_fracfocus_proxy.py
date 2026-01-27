@@ -1,12 +1,13 @@
 """
-Validate FracFocus Data as Proxy for Atlas Revenue
+Validate FracFocus Data as Proxy for Atlas Revenue Growth
 
-Compares FracFocus-derived tonnage to Atlas's actual 2023 product sales
-to determine if this approach is viable.
+Tests if % change in FracFocus tonnage (2022→2023) can predict
+% change in actual revenue (2022→2023).
 
-Atlas 2023 Actual (from 10-K):
-- Product sales: $468,119,000
-- Expected price: ~$28/ton
+Atlas Actual (from 10-K):
+- 2022 Product sales: $408,446,000
+- 2023 Product sales: $468,119,000
+- Revenue growth: +14.6%
 """
 
 import pandas as pd
@@ -26,7 +27,9 @@ CSV_FILE = DATA_DIR / 'FracFocusRegistry_13.csv'
 
 # Constants
 PRICE_PER_TON = 28.0  # $/ton (from user)
+ACTUAL_PRODUCT_SALES_2022 = 408_446_000  # $ (from 10-K)
 ACTUAL_PRODUCT_SALES_2023 = 468_119_000  # $ (from 10-K)
+ACTUAL_REVENUE_GROWTH_PCT = ((ACTUAL_PRODUCT_SALES_2023 - ACTUAL_PRODUCT_SALES_2022) / ACTUAL_PRODUCT_SALES_2022) * 100
 LBS_PER_TON = 2000.0
 
 
@@ -89,10 +92,57 @@ def calculate_proppant_mass(row: pd.Series) -> float:
         return 0.0
 
 
+def calculate_annual_tonnage(atlas_df: pd.DataFrame, year: int) -> tuple:
+    """
+    Calculate total tonnage for a specific year.
+
+    Returns:
+        (total_tonnes, unique_wells, avg_tonnes_per_well)
+    """
+    # Filter to specific year
+    atlas_year = atlas_df[atlas_df['Year'] == year].copy()
+    logger.info(f"\n{year} Atlas records: {len(atlas_year):,}")
+
+    if len(atlas_year) == 0:
+        logger.warning(f"No {year} Atlas records found!")
+        return 0.0, 0, 0.0
+
+    # Calculate proppant mass for EACH ingredient row (do NOT deduplicate!)
+    logger.info(f"Calculating proppant mass for each ingredient row...")
+    logger.info(f"Total ingredient rows: {len(atlas_year):,}")
+
+    atlas_year['Proppant_Mass_Lbs'] = atlas_year.apply(calculate_proppant_mass, axis=1)
+
+    # Remove records with zero mass
+    atlas_year = atlas_year[atlas_year['Proppant_Mass_Lbs'] > 0]
+    logger.info(f"Valid ingredient rows with mass: {len(atlas_year):,}")
+
+    # Convert to tonnes
+    atlas_year['Proppant_Tonnes'] = atlas_year['Proppant_Mass_Lbs'] / LBS_PER_TON
+
+    # Group by DisclosureId and sum all proppant ingredients per well
+    logger.info(f"Aggregating proppant by well (summing all ingredient rows)...")
+    well_totals = atlas_year.groupby('DisclosureId').agg({
+        'Proppant_Tonnes': 'sum',
+        'JobStartDate': 'first',
+        'Supplier': 'first'
+    }).reset_index()
+
+    unique_wells = len(well_totals)
+    avg_per_well = well_totals['Proppant_Tonnes'].mean()
+    total_tonnes = well_totals['Proppant_Tonnes'].sum()
+
+    logger.info(f"Unique wells: {unique_wells:,}")
+    logger.info(f"Average proppant per well: {avg_per_well:,.0f} tonnes")
+    logger.info(f"Total tonnage: {total_tonnes:,.0f} tonnes")
+
+    return total_tonnes, unique_wells, avg_per_well
+
+
 def main():
     """Main validation logic"""
     logger.info("=" * 80)
-    logger.info("FRACFOCUS DATA VALIDATION - ATLAS 2023 REVENUE PROXY")
+    logger.info("FRACFOCUS DATA VALIDATION - GROWTH RATE PREDICTION")
     logger.info("=" * 80)
 
     # Check file exists
@@ -136,104 +186,96 @@ def main():
     atlas_df['JobStartDate'] = pd.to_datetime(atlas_df['JobStartDate'], errors='coerce')
     atlas_df['Year'] = atlas_df['JobStartDate'].dt.year
 
-    # Filter to 2023
-    atlas_2023 = atlas_df[atlas_df['Year'] == 2023].copy()
-    logger.info(f"\nAtlas 2023 records: {len(atlas_2023):,}")
+    # Calculate tonnage for 2022 and 2023
+    logger.info("\n" + "=" * 80)
+    logger.info("CALCULATING 2022 TONNAGE")
+    logger.info("=" * 80)
+    tonnes_2022, wells_2022, avg_2022 = calculate_annual_tonnage(atlas_df, 2022)
 
-    if len(atlas_2023) == 0:
-        logger.error("No 2023 Atlas records found!")
+    logger.info("\n" + "=" * 80)
+    logger.info("CALCULATING 2023 TONNAGE")
+    logger.info("=" * 80)
+    tonnes_2023, wells_2023, avg_2023 = calculate_annual_tonnage(atlas_df, 2023)
+
+    # Calculate growth rates
+    if tonnes_2022 == 0:
+        logger.error("No 2022 data found - cannot calculate growth rate!")
         return
 
-    # Calculate proppant mass for EACH ingredient row (do NOT deduplicate!)
-    # Each row represents a different proppant product in the same well
-    logger.info("\nCalculating proppant mass for each ingredient row...")
-    logger.info(f"Total ingredient rows: {len(atlas_2023):,}")
-
-    atlas_2023['Proppant_Mass_Lbs'] = atlas_2023.apply(calculate_proppant_mass, axis=1)
-
-    # Remove records with zero mass
-    atlas_2023 = atlas_2023[atlas_2023['Proppant_Mass_Lbs'] > 0]
-    logger.info(f"Valid ingredient rows with mass: {len(atlas_2023):,}")
-
-    # Convert to tonnes
-    atlas_2023['Proppant_Tonnes'] = atlas_2023['Proppant_Mass_Lbs'] / LBS_PER_TON
-
-    # Group by DisclosureId and sum all proppant ingredients per well
-    logger.info("\nAggregating proppant by well (summing all ingredient rows)...")
-    well_totals = atlas_2023.groupby('DisclosureId').agg({
-        'Proppant_Tonnes': 'sum',
-        'JobStartDate': 'first',
-        'Supplier': 'first'
-    }).reset_index()
-
-    logger.info(f"Unique wells: {len(well_totals):,}")
-    logger.info(f"Average proppant per well: {well_totals['Proppant_Tonnes'].mean():,.0f} tonnes")
-
-    # Calculate totals
-    total_tonnes = well_totals['Proppant_Tonnes'].sum()
-    implied_revenue = total_tonnes * PRICE_PER_TON
-
-    # Use well_totals for detailed output
-    valid_records = well_totals
-
-    # Calculate accuracy
-    revenue_delta = implied_revenue - ACTUAL_PRODUCT_SALES_2023
-    revenue_pct_error = (revenue_delta / ACTUAL_PRODUCT_SALES_2023) * 100
+    tonnage_growth_pct = ((tonnes_2023 - tonnes_2022) / tonnes_2022) * 100
 
     # Display results
     logger.info("\n" + "=" * 80)
-    logger.info("RESULTS")
+    logger.info("RESULTS: GROWTH RATE COMPARISON")
     logger.info("=" * 80)
-    logger.info(f"\nFracFocus 2023 Data:")
-    logger.info(f"  Total tonnage: {total_tonnes:,.0f} tonnes")
-    logger.info(f"  Implied revenue (@${PRICE_PER_TON}/ton): ${implied_revenue:,.0f}")
 
-    logger.info(f"\nAtlas 2023 Actual (10-K):")
-    logger.info(f"  Product sales: ${ACTUAL_PRODUCT_SALES_2023:,.0f}")
+    logger.info(f"\n📊 FracFocus Data (2022 → 2023):")
+    logger.info(f"  2022 tonnage: {tonnes_2022:,.0f} tonnes ({wells_2022:,} wells)")
+    logger.info(f"  2023 tonnage: {tonnes_2023:,.0f} tonnes ({wells_2023:,} wells)")
+    logger.info(f"  Growth: {tonnage_growth_pct:+.1f}%")
 
-    logger.info(f"\nComparison:")
-    logger.info(f"  Delta: ${revenue_delta:+,.0f}")
-    logger.info(f"  Error: {revenue_pct_error:+.1f}%")
+    logger.info(f"\n💰 Atlas Actual Revenue (2022 → 2023):")
+    logger.info(f"  2022 product sales: ${ACTUAL_PRODUCT_SALES_2022:,.0f}")
+    logger.info(f"  2023 product sales: ${ACTUAL_PRODUCT_SALES_2023:,.0f}")
+    logger.info(f"  Growth: {ACTUAL_REVENUE_GROWTH_PCT:+.1f}%")
+
+    # Compare growth rates
+    growth_error = tonnage_growth_pct - ACTUAL_REVENUE_GROWTH_PCT
+
+    logger.info(f"\n🎯 Growth Rate Prediction Accuracy:")
+    logger.info(f"  FracFocus predicted: {tonnage_growth_pct:+.1f}% growth")
+    logger.info(f"  Actual revenue grew: {ACTUAL_REVENUE_GROWTH_PCT:+.1f}%")
+    logger.info(f"  Prediction error: {growth_error:+.1f} percentage points")
 
     # Interpretation
     logger.info("\n" + "=" * 80)
     logger.info("INTERPRETATION")
     logger.info("=" * 80)
 
-    if abs(revenue_pct_error) < 10:
-        logger.info("✅ EXCELLENT: FracFocus data is within 10% of actual revenue!")
-        logger.info("   This approach is highly viable as a revenue proxy.")
-    elif abs(revenue_pct_error) < 25:
-        logger.info("⚠️  MODERATE: FracFocus data is within 25% of actual revenue.")
-        logger.info("   This approach may be useful but needs refinement.")
-    elif abs(revenue_pct_error) < 50:
-        logger.info("⚠️  POOR: FracFocus data is 25-50% off from actual revenue.")
-        logger.info("   Significant issues with data completeness or methodology.")
+    if abs(growth_error) < 3:
+        logger.info("✅ EXCELLENT: FracFocus growth rate matches actual within 3pp!")
+        logger.info("   This model CAN predict quarterly revenue changes!")
+        logger.info("   Even if absolute tonnage is incomplete, the TREND is accurate.")
+    elif abs(growth_error) < 5:
+        logger.info("✅ GOOD: FracFocus growth rate matches actual within 5pp.")
+        logger.info("   This model can reasonably predict revenue direction.")
+    elif abs(growth_error) < 10:
+        logger.info("⚠️  MODERATE: FracFocus growth rate is within 10pp of actual.")
+        logger.info("   Directionally useful but significant noise.")
     else:
-        logger.info("❌ FAILED: FracFocus data is >50% off from actual revenue.")
-        logger.info("   This approach is not viable without major corrections.")
+        logger.info("❌ POOR: FracFocus growth rate differs by >10pp from actual.")
+        logger.info("   This model cannot reliably predict revenue changes.")
 
-    # Possible explanations for error
-    logger.info("\nPossible explanations for discrepancy:")
-    if revenue_pct_error < -25:
-        logger.info("  - FracFocus data is incomplete (not all jobs reported)")
-        logger.info("  - Timing lag (2023 shipments reported in 2024)")
-        logger.info("  - Price assumption too low (actual ASP > $28/ton)")
-    elif revenue_pct_error > 25:
-        logger.info("  - Duplicate records not fully removed")
-        logger.info("  - Non-Atlas suppliers incorrectly matched")
-        logger.info("  - Price assumption too high (actual ASP < $28/ton)")
+    # Possible explanations
+    logger.info("\nPossible explanations for growth rate discrepancy:")
+    if growth_error < -5:
+        logger.info("  - FracFocus coverage declined 2022→2023")
+        logger.info("  - More wells missing from 2023 data than 2022")
+        logger.info("  - Atlas ASP increased (price growth not captured)")
+    elif growth_error > 5:
+        logger.info("  - FracFocus coverage improved 2022→2023")
+        logger.info("  - More complete disclosure in 2023")
+        logger.info("  - Atlas ASP decreased (tonnage grew faster than revenue)")
     else:
-        logger.info("  - Data quality is reasonable")
-        logger.info("  - Minor timing lags or pricing variations")
+        logger.info("  - Coverage relatively consistent year-over-year")
+        logger.info("  - FracFocus can serve as early indicator of demand trends")
 
     # Save detailed output
-    output_path = Path('output') / 'validation_results_2023.csv'
+    output_path = Path('output') / 'validation_growth_rates.txt'
     output_path.parent.mkdir(exist_ok=True)
 
-    valid_records[['DisclosureId', 'JobStartDate', 'Supplier',
-                   'Proppant_Tonnes']].to_csv(output_path, index=False)
-    logger.info(f"\nDetailed results saved to: {output_path}")
+    with open(output_path, 'w') as f:
+        f.write("FRACFOCUS GROWTH RATE VALIDATION\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"2022 tonnage: {tonnes_2022:,.0f} tonnes ({wells_2022:,} wells)\n")
+        f.write(f"2023 tonnage: {tonnes_2023:,.0f} tonnes ({wells_2023:,} wells)\n")
+        f.write(f"FracFocus growth: {tonnage_growth_pct:+.1f}%\n\n")
+        f.write(f"2022 revenue: ${ACTUAL_PRODUCT_SALES_2022:,.0f}\n")
+        f.write(f"2023 revenue: ${ACTUAL_PRODUCT_SALES_2023:,.0f}\n")
+        f.write(f"Actual growth: {ACTUAL_REVENUE_GROWTH_PCT:+.1f}%\n\n")
+        f.write(f"Prediction error: {growth_error:+.1f} pp\n")
+
+    logger.info(f"\nResults saved to: {output_path}")
 
     logger.info("\n" + "=" * 80)
 
